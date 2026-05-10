@@ -36,15 +36,22 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Deploy to Azure Container App
-        uses: azure/container-apps-deploy-action@v1
-        with:
-          acrName: devsecopspocregistry-b0d2fmcsateqbpg3
-          containerAppName: ${{ secrets.AZURE_CONTAINER_APP_NAME }}
-          resourceGroup: ${{ secrets.AZURE_RESOURCE_GROUP }}
-          imageToDeploy: ${{ secrets.AZURE_REGISTRY_LOGIN_SERVER }}/devsecops-dashboard:latest
-          environmentVariables: >
-            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN_SECRET }}
-            GITHUB_REPO=harikrishnadevsecops-arch/WebGoat
-            REPORTS_DIR=/tmp/poc-reports
-            WEBGOAT_LOCAL=/tmp/poc-webgoat
+        run: |
+          az containerapp registry set \
+            --name ${{ secrets.AZURE_CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --server ${{ secrets.AZURE_REGISTRY_LOGIN_SERVER }} \
+            --username ${{ secrets.AZURE_REGISTRY_USERNAME }} \
+            --password ${{ secrets.AZURE_REGISTRY_PASSWORD }}
+
+          az containerapp update \
+            --name ${{ secrets.AZURE_CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --image ${{ secrets.AZURE_REGISTRY_LOGIN_SERVER }}/devsecops-dashboard:latest \
+            --set-env-vars \
+              GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN_SECRET }} \
+              GITHUB_REPO=harikrishnadevsecops-arch/WebGoat \
+              REPORTS_DIR=/tmp/poc-reports \
+              WEBGOAT_LOCAL=/tmp/poc-webgoat
+
 
