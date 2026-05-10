@@ -23,10 +23,11 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./dashboard
+          context: .
           file: ./dashboard/Dockerfile
           push: true
           tags: ${{ secrets.AZURE_REGISTRY_LOGIN_SERVER }}/devsecops-dashboard:latest
+
 
 
       - name: Login to Azure
