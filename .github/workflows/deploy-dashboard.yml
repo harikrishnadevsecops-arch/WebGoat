@@ -38,7 +38,7 @@ jobs:
       - name: Deploy to Azure Container App
         uses: azure/container-apps-deploy-action@v1
         with:
-          acrName: devsecopspocregistry
+          acrName: devsecopspocregistry-b0d2fmcsateqbpg3
           containerAppName: ${{ secrets.AZURE_CONTAINER_APP_NAME }}
           resourceGroup: ${{ secrets.AZURE_RESOURCE_GROUP }}
           imageToDeploy: ${{ secrets.AZURE_REGISTRY_LOGIN_SERVER }}/devsecops-dashboard:latest
@@ -47,3 +47,4 @@ jobs:
             GITHUB_REPO=harikrishnadevsecops-arch/WebGoat
             REPORTS_DIR=/tmp/poc-reports
             WEBGOAT_LOCAL=/tmp/poc-webgoat
+
