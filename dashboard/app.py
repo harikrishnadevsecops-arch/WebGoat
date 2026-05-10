@@ -15,9 +15,8 @@ db = Database()
 REPORTS_DIR   = os.getenv('REPORTS_DIR', '/tmp/poc-reports')
 WEBGOAT_LOCAL = os.getenv('WEBGOAT_LOCAL', '/tmp/poc-webgoat')
 GITHUB_TOKEN  = os.getenv('GITHUB_TOKEN', '')
-GITLAB_URL    = os.getenv('GITLAB_URL', 'https://gitlab.pcsupportlab.local')
-GITLAB_TOKEN  = os.getenv('GITLAB_TOKEN', '')
-GITLAB_PROJECT_ID = os.getenv('GITLAB_PROJECT_ID', '')
+GITHUB_REPO   = os.getenv('GITHUB_REPO', 'harikrishnadevsecops-arch/WebGoat')
+GITHUB_TOKEN_API = os.getenv('GITHUB_TOKEN', '')
 os.environ['no_proxy'] = 'localhost,127.0.0.1,gitlab.pcsupportlab.local'
 os.environ['NO_PROXY'] = 'localhost,127.0.0.1,gitlab.pcsupportlab.local'
 GITHUB_MODELS_URL = 'https://models.inference.ai.azure.com/chat/completions'
@@ -223,23 +222,23 @@ def _ensure_local_webgoat():
     os.makedirs(WEBGOAT_LOCAL, exist_ok=True)
     webgoat_lessons = os.path.join(WEBGOAT_LOCAL, 'webgoat-lessons')
     if not os.path.exists(webgoat_lessons):
-        log_event('Cloning WebGoat from GitHub into poc-webgoat...', step='ai_fix')
+        log_event('Cloning WebGoat from GitHub...', step='ai_fix')
         try:
             import shutil
             shutil.rmtree(WEBGOAT_LOCAL)
             os.makedirs(WEBGOAT_LOCAL, exist_ok=True)
-        except Exception as cleanup_err:
-            log_event(f'Cleanup skipped: {cleanup_err} - cloning into existing folder', 'warning', step='ai_fix')
+        except Exception as e:
+            log_event(f'Cleanup skipped: {e}', 'warning', step='ai_fix')
         try:
             subprocess.run(
                 ['git', 'clone', '--depth=1', '--branch', 'v8.2.2',
-                 'https://github.com/WebGoat/WebGoat.git',
+                 f'https://{GITHUB_TOKEN_API}@github.com/{GITHUB_REPO}.git',
                  WEBGOAT_LOCAL],
                 check=True, capture_output=True
             )
             log_event('WebGoat cloned successfully', step='ai_fix')
-        except Exception as clone_err:
-            log_event(f'Clone failed: {clone_err}', 'error', step='ai_fix')
+        except Exception as e:
+            log_event(f'Clone failed: {e}', 'error', step='ai_fix')
             raise
     else:
         log_event('WebGoat already cloned - using existing copy', step='ai_fix')
@@ -247,31 +246,61 @@ def _ensure_local_webgoat():
 
 def _git_commit_and_push(fixed_files):
     try:
-        log_event(f'Fixed files saved locally in {WEBGOAT_LOCAL}', 'success', step='commit')
-        log_event(f'Rescan will scan fixed files directly from disk', 'info', step='commit')
+        subprocess.run(['git', 'config', 'user.email', 'ai-agent@devsecops.poc'],
+                      cwd=WEBGOAT_LOCAL, capture_output=True)
+        subprocess.run(['git', 'config', 'user.name', 'AI Security Agent'],
+                      cwd=WEBGOAT_LOCAL, capture_output=True)
+        for f in fixed_files:
+            rel = os.path.relpath(f, WEBGOAT_LOCAL)
+            subprocess.run(['git', 'add', rel], cwd=WEBGOAT_LOCAL, capture_output=True)
+        status = subprocess.run(['git', 'status', '--porcelain'],
+                               cwd=WEBGOAT_LOCAL, capture_output=True, text=True)
+        if not status.stdout.strip():
+            log_event('No changes to commit', 'warning', step='commit')
+            return True
+        msg = f'[AI-Fix] Auto-remediated {len(fixed_files)} vulnerable files'
+        subprocess.run(['git', 'commit', '-m', msg],
+                      cwd=WEBGOAT_LOCAL, check=True, capture_output=True)
+        # Push to GitHub using token authentication
+        remote_url = f'https://{GITHUB_TOKEN_API}@github.com/{GITHUB_REPO}.git'
+        subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url],
+                      cwd=WEBGOAT_LOCAL, capture_output=True)
+        subprocess.run(['git', 'push', 'origin', 'HEAD'],
+                      cwd=WEBGOAT_LOCAL, check=True, capture_output=True)
+        log_event('Fixed files pushed to GitHub', 'success', step='commit')
         return True
-    except Exception as e:
-        log_event(f'Error: {e}', 'error')
+    except subprocess.CalledProcessError as e:
+        log_event(f'Git error: {e}', 'error')
         return False
 
+
 def _trigger_rescan_pipeline():
-    if not GITLAB_TOKEN or not GITLAB_PROJECT_ID:
-        log_event('GITLAB_TOKEN/PROJECT_ID not set - trigger rescan manually', 'warning')
+    if not GITHUB_TOKEN_API:
+        log_event('GITHUB_TOKEN not set - trigger rescan manually', 'warning')
         return
     try:
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         r = requests.post(
-            f'{GITLAB_URL}/api/v4/projects/{GITLAB_PROJECT_ID}/pipeline',
-            headers={'PRIVATE-TOKEN': GITLAB_TOKEN},
-            json={'ref': 'main', 'variables': [{'key': 'SCAN_TYPE', 'value': 'rescan'}]},
-            timeout=10,
-            verify=False
+            f'https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/devsecops-pipeline.yml/dispatches',
+            headers={
+                'Authorization': f'Bearer {GITHUB_TOKEN_API}',
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'ref': 'main',
+                'inputs': {'scan_type': 'rescan'}
+            },
+            timeout=10
         )
-        r.raise_for_status()
-        log_event(f'Re-scan pipeline triggered automatically (ID: {r.json().get("id")})', 'success', step='rescan')
+        if r.status_code == 204:
+            log_event('Re-scan pipeline triggered automatically', 'success', step='rescan')
+        else:
+            log_event(f'Could not trigger re-scan: {r.status_code} {r.text}', 'warning')
     except Exception as e:
         log_event(f'Could not auto-trigger re-scan: {e}. Run manually.', 'warning')
+
 
 def _parse_report(report_path):
     try:
