@@ -1,0 +1,77 @@
+name: DevSecOps AI Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      scan_type:
+        description: 'Scan type'
+        required: true
+        default: 'initial'
+        type: choice
+        options:
+          - initial
+          - rescan
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    env:
+      DASHBOARD_URL: https://devsecops-dashboard.calmtree-dd2b6dea.eastus.azurecontainerapps.io
+      SCAN_TYPE: ${{ github.event.inputs.scan_type || 'rescan' }}
+
+    steps:
+      - name: Checkout WebGoat
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Notify dashboard - scan starting
+        run: |
+          curl -s -X POST "$DASHBOARD_URL/webhook/step-update" \
+            -H "Content-Type: application/json" \
+            -d "{\"step\":\"scan\",\"status\":\"running\",\"scan_type\":\"$SCAN_TYPE\"}" || true
+
+      - name: Run Semgrep SAST scan
+        run: |
+          mkdir -p reports
+          semgrep scan \
+            --config=p/java \
+            --config=p/owasp-top-ten \
+            --json \
+            --output=reports/${{ env.SCAN_TYPE }}_scan.json \
+            --severity=WARNING \
+            --severity=ERROR \
+            --timeout=300 \
+            webgoat-lessons/ || true
+
+          TOTAL=$(python3 -c "
+          import json
+          with open('reports/${{ env.SCAN_TYPE }}_scan.json') as f:
+              d = json.load(f)
+          print(len(d.get('results', [])))
+          " 2>/dev/null || echo "0")
+          echo "FINDINGS_COUNT=$TOTAL" >> $GITHUB_ENV
+          echo "Findings: $TOTAL"
+
+      - name: Notify dashboard - scan complete
+        run: |
+          REPORT_CONTENT=$(cat reports/${{ env.SCAN_TYPE }}_scan.json | base64 -w 0)
+          curl -s -X POST "$DASHBOARD_URL/webhook/scan-complete" \
+            -H "Content-Type: application/json" \
+            -d "{\"scan_type\":\"$SCAN_TYPE\",\"pipeline_id\":\"${{ github.run_id }}\",\"findings_count\":$FINDINGS_COUNT,\"report_content\":\"$REPORT_CONTENT\"}" || true
+
+      - name: Upload scan report
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report-${{ env.SCAN_TYPE }}
+          path: reports/
+          retention-days: 30
