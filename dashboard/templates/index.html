@@ -1,0 +1,337 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>DevSecOps AI POC</title>
+<script src=https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js></script>
+<script src=https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js></script>
+<style>
+:root {
+  --navy:#0D1B2A; --navy2:#1B3A5C; --teal:#0E6655; --teal2:#17A589;
+  --amber:#B7770D; --red:#A32D2D; --green:#27500A; --green2:#52B788;
+  --purple:#534AB7; --bg:#0F1923; --bg2:#162232; --bg3:#1E3048;
+  --border:rgba(255,255,255,0.08); --text:#E8F4FD; --text2:#8DB7D4; --text3:#4A7FA0;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:var(--bg); color:var(--text); font-family:'Segoe UI',Arial,sans-serif; font-size:14px; }
+.header { background:var(--navy2); padding:14px 24px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); }
+.header h1 { font-size:18px; font-weight:600; color:#fff; display:flex; align-items:center; gap:10px; }
+.logo { width:28px; height:28px; background:var(--teal); border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:16px; }
+.live-badge { background:var(--green2); color:#fff; font-size:11px; font-weight:600; padding:3px 10px; border-radius:20px; }
+.live-badge.idle { background:var(--text3); }
+.main { display:grid; grid-template-columns:1fr 320px; gap:16px; padding:16px; }
+.steps-card { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:20px; }
+.card-title { font-size:11px; font-weight:600; color:var(--text2); letter-spacing:1px; text-transform:uppercase; margin-bottom:16px; }
+.steps { display:flex; align-items:center; }
+.step { display:flex; flex-direction:column; align-items:center; flex:1; position:relative; }
+.step:not(:last-child)::after { content:''; position:absolute; top:20px; left:calc(50% + 20px); right:calc(-50% + 20px); height:2px; background:var(--border); z-index:0; }
+.step:not(:last-child).done::after,.step:not(:last-child).running::after { background:var(--teal2); }
+.step-circle { width:40px; height:40px; border-radius:50%; background:var(--bg3); border:2px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:16px; z-index:1; transition:all 0.4s; }
+.step.done .step-circle { background:var(--teal); border-color:var(--teal2); }
+.step.running .step-circle { border-color:var(--teal2); animation:pulse 1.5s ease-in-out infinite; }
+.step.error .step-circle { background:#501313; border-color:var(--red); }
+.step-label { font-size:11px; color:var(--text3); margin-top:8px; text-align:center; font-weight:500; }
+.step.done .step-label { color:var(--teal2); }
+.step.running .step-label { color:#fff; }
+@keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(23,165,137,0.4)} 50%{box-shadow:0 0 0 8px rgba(23,165,137,0)} }
+.metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:16px; }
+.metric { background:var(--bg3); border:1px solid var(--border); border-radius:10px; padding:16px; text-align:center; }
+.metric-val { font-size:32px; font-weight:700; line-height:1; }
+.metric-label { font-size:11px; color:var(--text2); margin-top:4px; }
+.metric-sub { font-size:11px; color:var(--text3); margin-top:2px; }
+.metric.before .metric-val { color:var(--red); }
+.metric.after .metric-val { color:var(--green2); }
+.metric.fixed .metric-val { color:#6DBAAE; }
+.metric.status .metric-val { color:var(--amber); font-size:14px; font-weight:600; }
+.comparison { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:20px; margin-top:16px; }
+.sev-row { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.sev-name { width:80px; font-size:12px; font-weight:600; }
+.sev-bar-wrap { flex:1; }
+.bar-label { font-size:10px; color:var(--text3); margin-bottom:2px; }
+.bar-track { height:8px; background:var(--bg3); border-radius:4px; overflow:hidden; }
+.bar-fill { height:100%; border-radius:4px; transition:width 0.8s ease; }
+.bar-fill.before { background:var(--red); }
+.bar-fill.after { background:var(--green2); }
+.sev-counts { width:60px; text-align:right; font-size:12px; font-weight:600; color:var(--text2); }
+.sev-row.error .sev-name { color:#F09595; }
+.sev-row.warning .sev-name { color:#FAC775; }
+.sev-row.info .sev-name { color:#85B7EB; }
+.table-card { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:20px; margin-top:16px; }
+.tab-btns { display:flex; gap:6px; }
+.tab-btn { font-size:11px; padding:4px 10px; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--text2); cursor:pointer; }
+.tab-btn.active { background:var(--teal); border-color:var(--teal2); color:#fff; }
+table { width:100%; border-collapse:collapse; }
+th { text-align:left; padding:8px 10px; font-size:11px; font-weight:600; color:var(--text3); border-bottom:1px solid var(--border); }
+td { padding:8px 10px; font-size:12px; color:var(--text2); border-bottom:1px solid rgba(255,255,255,0.04); }
+td.file-col { color:var(--text); font-weight:500; }
+.badge { font-size:10px; padding:2px 8px; border-radius:10px; font-weight:600; }
+.badge.ERROR { background:#501313; color:#F09595; }
+.badge.WARNING { background:#412402; color:#FAC775; }
+.badge.INFO { background:#042C53; color:#85B7EB; }
+.log-card { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:16px; display:flex; flex-direction:column; }
+.log-stream { overflow-y:auto; font-family:'Courier New',monospace; font-size:12px; line-height:1.6; max-height:700px; }
+.log-entry { padding:2px 0; display:flex; gap:8px; }
+.log-ts { color:var(--text3); min-width:55px; }
+.log-msg.success { color:var(--green2); }
+.log-msg.error { color:#F09595; }
+.log-msg.warning { color:#FAC775; }
+.log-msg.info { color:var(--text); }
+.empty-state { text-align:center; padding:40px; color:var(--text3); }
+.reset-btn { background:transparent; border:1px solid var(--border); color:var(--text2); font-size:12px; padding:6px 14px; border-radius:6px; cursor:pointer; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>
+    <div class="logo"></div>
+    DevSecOps AI POC
+    <span style="font-size:12px;color:var(--text2)">OWASP WebGoat  Semgrep SAST  GitHub Copilot AI</span>
+  </h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span id="live-badge" class="live-badge idle">IDLE</span>
+    <button class="reset-btn" onclick="resetPOC()"> Reset</button>
+  </div>
+</div>
+<div class="main">
+  <div>
+    <div class="steps-card">
+      <div class="card-title">Pipeline progress</div>
+      <div class="steps">
+        <div class="step" id="step-prepare"><div class="step-circle"></div><div class="step-label">Checkout<br>&amp; Prepare</div></div>
+        <div class="step" id="step-build"><div class="step-circle"></div><div class="step-label">Build<br>WebGoat</div></div>
+        <div class="step" id="step-scan"><div class="step-circle"></div><div class="step-label">Semgrep<br>SAST Scan</div></div>
+        <div class="step" id="step-ai_fix"><div class="step-circle"></div><div class="step-label">GitHub AI<br>Code Fix</div></div>
+        <div class="step" id="step-commit"><div class="step-circle"></div><div class="step-label">Commit<br>&amp; Push</div></div>
+        <div class="step" id="step-rescan"><div class="step-circle"></div><div class="step-label">Re-scan<br>Verify</div></div>
+      </div>
+    </div>
+    <div class="metrics">
+      <div class="metric before"><div class="metric-val" id="m-before">-</div><div class="metric-label">Before (initial)</div><div class="metric-sub">Vulnerabilities found</div></div>
+      <div class="metric after"><div class="metric-val" id="m-after">-</div><div class="metric-label">After (re-scan)</div><div class="metric-sub">Remaining issues</div></div>
+      <div class="metric fixed"><div class="metric-val" id="m-fixed">-</div><div class="metric-label">Fixed by AI</div><div class="metric-sub" id="m-pct">-</div></div>
+      <div class="metric status"><div class="metric-val" id="m-status">Waiting for pipeline</div><div class="metric-label">Current status</div><div class="metric-sub" id="m-scan-type">-</div></div>
+    </div>
+    <div class="comparison">
+      <div class="card-title">Vulnerability breakdown - before vs after</div>
+      <div class="sev-row error">
+        <div class="sev-name">CRITICAL</div>
+        <div class="sev-bar-wrap">
+          <div class="bar-label">Before</div><div class="bar-track"><div class="bar-fill before" id="bar-b-ERROR" style="width:0%"></div></div>
+          <div class="bar-label" style="margin-top:4px">After</div><div class="bar-track"><div class="bar-fill after" id="bar-a-ERROR" style="width:0%"></div></div>
+        </div>
+        <div class="sev-counts" id="cnt-ERROR">0  0</div>
+      </div>
+      <div class="sev-row warning">
+        <div class="sev-name">WARNING</div>
+        <div class="sev-bar-wrap">
+          <div class="bar-label">Before</div><div class="bar-track"><div class="bar-fill before" id="bar-b-WARNING" style="width:0%"></div></div>
+          <div class="bar-label" style="margin-top:4px">After</div><div class="bar-track"><div class="bar-fill after" id="bar-a-WARNING" style="width:0%"></div></div>
+        </div>
+        <div class="sev-counts" id="cnt-WARNING">0  0</div>
+      </div>
+      <div class="sev-row info">
+        <div class="sev-name">INFO</div>
+        <div class="sev-bar-wrap">
+          <div class="bar-label">Before</div><div class="bar-track"><div class="bar-fill before" id="bar-b-INFO" style="width:0%"></div></div>
+          <div class="bar-label" style="margin-top:4px">After</div><div class="bar-track"><div class="bar-fill after" id="bar-a-INFO" style="width:0%"></div></div>
+        </div>
+        <div class="sev-counts" id="cnt-INFO">0  0</div>
+      </div>
+    </div>
+    <div class="table-card">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        Vulnerability findings
+        <div class="tab-btns">
+          <button class="tab-btn active" onclick="loadFindings('initial',this)">Before</button>
+          <button class="tab-btn" onclick="loadFindings('rescan',this)">After</button>
+        </div>
+      </div>
+      <div id="findings-wrap"><div class="empty-state">No scan data yet. Trigger the pipeline to begin.</div></div>
+    </div>
+  </div>
+  <div class="log-card">
+    <div class="card-title">Live activity log</div>
+    <div class="log-stream" id="log-stream">
+      <div class="log-entry"><span class="log-ts">--:--:--</span><span class="log-msg info">Dashboard ready. Waiting for pipeline...</span></div>
+    </div>
+  </div>
+</div>
+<script>
+const socket = io();
+const STEPS = ['prepare','build','scan','ai_fix','commit','rescan'];
+
+socket.on('connect', () => addLog('Connected to dashboard server','success'));
+socket.on('disconnect', () => addLog('Disconnected from server','error'));
+
+socket.on('state_sync', (d) => {
+  if(d.initial_count > 0) updateMetrics(d.initial_count, null, d.initial_summary, null);
+  if(d.rescan_count > 0) updateMetrics(d.initial_count, d.rescan_count, d.initial_summary, d.rescan_summary);
+  (d.log||[]).forEach(e => addLogEntry(e));
+  updateStep(d.current_step, 'running');
+});
+
+socket.on('step_update', (d) => {
+  if (d.scan_type === 'rescan') {
+    setStepState('prepare', 'done');
+    setStepState('build', 'done');
+    setStepState('scan', 'done');
+    setStepState('ai_fix', 'done');
+    setStepState('commit', 'done');
+    setStepState('rescan', 'running');
+    document.getElementById('m-status').textContent = 'RESCAN: ' + d.step.toUpperCase();
+    document.getElementById('m-scan-type').textContent = 'verification scan';
+    updateLiveBadge('rescan', 'running');
+  } else {
+    updateStep(d.step, d.status);
+    document.getElementById('m-status').textContent = d.step.replace('_',' ').toUpperCase();
+    document.getElementById('m-scan-type').textContent = d.scan_type||'';
+    updateLiveBadge(d.step, d.status);
+  }
+});
+
+socket.on('initial_scan_complete', (d) => {
+  updateMetrics(d.count, null, d.by_severity, null);
+  addLog('Initial scan complete: ' + d.count + ' vulnerabilities found','success');
+  updateStep('scan','done');
+  updateStep('ai_fix','running');
+  loadFindings('initial');
+});
+
+socket.on('ai_fixing_file', (d) => {
+  addLog('AI fixing: ' + d.file + ' (' + d.issues + ' issues)','info');
+});
+
+socket.on('rescan_complete', (d) => {
+  updateMetrics(null, d.remaining, d.before, d.after);
+  addLog('Re-scan complete: ' + d.remaining + ' remaining (' + d.fixed + ' fixed by AI)','success');
+  STEPS.forEach(s => setStepState(s, 'done'));
+  updateLiveBadge('done', 'complete');
+  document.getElementById('m-status').textContent = 'COMPLETE ✅';
+  document.getElementById('m-scan-type').textContent = 'POC finished';
+  loadFindings('rescan');
+});
+
+socket.on('log_entry', (e) => addLogEntry(e));
+socket.on('reset', () => location.reload());
+
+function updateLiveBadge(step, status) {
+  const b = document.getElementById('live-badge');
+  if(step==='done'||status==='complete'){
+    b.textContent='COMPLETE'; b.className='live-badge'; b.style.background='#27500A';
+  } else if(status==='running'){
+    b.textContent='LIVE'; b.className='live-badge';
+  } else {
+    b.textContent='IDLE'; b.className='live-badge idle';
+  }
+}
+
+function updateStep(currentStep, status) {
+  if (currentStep === 'done' || status === 'complete') {
+    STEPS.forEach(s => setStepState(s, 'done'));
+    return;
+  }
+  STEPS.forEach((s, i) => {
+    const el = document.getElementById('step-' + s);
+    if (!el) return;
+    const idx = STEPS.indexOf(currentStep);
+    if (i < idx) setStepState(s, 'done');
+    else if (s === currentStep) setStepState(s, 'running');
+    else setStepState(s, 'idle');
+  });
+}
+
+function setStepState(step, state) {
+  const el = document.getElementById('step-'+step);
+  if(el) el.className = 'step ' + state;
+}
+
+function updateMetrics(before, after, bSev, aSev) {
+  if(before !== null) document.getElementById('m-before').textContent = before;
+  if(after !== null) {
+    document.getElementById('m-after').textContent = after;
+    const b = parseInt(document.getElementById('m-before').textContent)||0;
+    const fixed = b - after;
+    const pct = b ? Math.round(fixed/b*100) : 0;
+    document.getElementById('m-fixed').textContent = fixed;
+    document.getElementById('m-pct').textContent = pct + '% reduction';
+  }
+  if(bSev) updateBars(bSev, aSev||{});
+}
+
+function updateBars(bSev, aSev) {
+  const keys = ['ERROR','WARNING','INFO'];
+  const bVals = keys.map(k => bSev[k]||0);
+  const aVals = keys.map(k => aSev[k]||0);
+  const maxVal = Math.max(...bVals, ...aVals, 1);
+  keys.forEach((k,i) => {
+    document.getElementById('bar-b-'+k).style.width = (bVals[i]/maxVal*100)+'%';
+    document.getElementById('bar-a-'+k).style.width = Object.keys(aSev).length?(aVals[i]/maxVal*100)+'%':'0%';
+    document.getElementById('cnt-'+k).textContent = Object.keys(aSev).length
+      ? bVals[i]+' -> '+aVals[i]
+      : bVals[i]+' -> ?';
+  });
+}
+
+function addLog(msg, level='info') {
+  const d = new Date();
+  const ts = d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0')+':'+d.getSeconds().toString().padStart(2,'0');
+  addLogEntry({ts, msg, level});
+}
+
+function addLogEntry(e) {
+  const stream = document.getElementById('log-stream');
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.innerHTML = '<span class="log-ts">'+e.ts+'</span><span class="log-msg '+(e.level||'info')+'">'+escHtml(e.msg)+'</span>';
+  stream.appendChild(div);
+  stream.scrollTop = stream.scrollHeight;
+  if(stream.children.length > 300) stream.removeChild(stream.firstChild);
+}
+
+function escHtml(t) {
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function loadFindings(type, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  if (btn) {
+    btn.classList.add('active');
+  } else {
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      if ((type === 'initial' && b.textContent.includes('Before')) ||
+          (type === 'rescan' && b.textContent.includes('After'))) {
+        b.classList.add('active');
+      }
+    });
+  }
+  const resp = await fetch('/api/findings?type='+type);
+  const data = await resp.json();
+  const wrap = document.getElementById('findings-wrap');
+  if(!data.length){
+    wrap.innerHTML='<div class="empty-state">No '+type+' scan data yet.</div>';
+    return;
+  }
+  const rows = data.map(f =>
+    '<tr><td class="file-col">'+escHtml(f.file)+'</td>'+
+    '<td><span class="badge '+f.severity+'">'+f.severity+'</span></td>'+
+    '<td>'+escHtml(f.rule)+'</td>'+
+    '<td>'+f.line+'</td>'+
+    '<td>'+escHtml(f.message)+'</td></tr>'
+  ).join('');
+  wrap.innerHTML='<table><thead><tr><th>File</th><th>Severity</th><th>Rule</th><th>Line</th><th>Message</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+
+async function resetPOC() {
+  if(!confirm('Reset all scan data?')) return;
+  await fetch('/api/reset',{method:'POST'});
+}
+
+fetch('/api/state').then(r=>r.json()).then(d=>{
+  if(d.initial_count>0) updateMetrics(d.initial_count, d.rescan_count||null, d.initial_summary, d.rescan_count?d.rescan_summary:null);
+  updateStep(d.current_step,'running');
+  loadFindings('initial');
+});
+</script>
+</body>
+</html>
