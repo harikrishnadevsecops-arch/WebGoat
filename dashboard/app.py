@@ -460,6 +460,16 @@ def api_findings():
     ]
     return jsonify(simplified)
 
+@app.route('/api/debug')
+def api_debug():
+    return jsonify({
+        'GH_API_TOKEN_set': bool(os.getenv('GH_API_TOKEN', '')),
+        'GH_API_TOKEN_length': len(os.getenv('GH_API_TOKEN', '')),
+        'GITHUB_TOKEN_API_set': bool(GITHUB_TOKEN_API),
+        'GITHUB_TOKEN_API_length': len(GITHUB_TOKEN_API),
+        'all_env_keys': [k for k in os.environ.keys() if 'TOKEN' in k.upper() or 'GH' in k.upper() or 'GITHUB' in k.upper()],
+    })
+
 @app.route('/api/reset', methods=['POST'])
 def api_reset():
     STATE.update({
