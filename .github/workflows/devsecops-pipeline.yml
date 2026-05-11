@@ -34,15 +34,58 @@ jobs:
       - name: Install Semgrep
         run: pip install semgrep
 
-      - name: Notify dashboard - scan starting
+      - name: Notify dashboard - scan complete
         run: |
-          curl -s -X POST "$DASHBOARD_URL/webhook/step-update" \
-            -H "Content-Type: application/json" \
-            -d "{\"step\":\"scan\",\"status\":\"running\",\"scan_type\":\"$SCAN_TYPE\"}" || true
+          python3 -c "
+import json, base64, urllib.request, os
+
+scan_type = os.environ.get('SCAN_TYPE', 'initial')
+run_id = os.environ.get('GITHUB_RUN_ID', '')
+findings_count = int(os.environ.get('FINDINGS_COUNT', '0'))
+dashboard_url = os.environ.get('DASHBOARD_URL', '')
+
+try:
+    with open(f'reports/{scan_type}_scan.json', 'rb') as f:
+        content = base64.b64encode(f.read()).decode('utf-8')
+except:
+    content = base64.b64encode(b'{\"results\":[]}').decode('utf-8')
+
+payload = json.dumps({
+    'scan_type': scan_type,
+    'pipeline_id': run_id,
+    'findings_count': findings_count,
+    'report_content': content
+}).encode('utf-8')
+
+req = urllib.request.Request(
+    f'{dashboard_url}/webhook/scan-complete',
+    data=payload,
+    headers={'Content-Type': 'application/json'},
+    method='POST'
+)
+try:
+    urllib.request.urlopen(req, timeout=30)
+    print('Dashboard notified successfully')
+except Exception as e:
+    print(f'Dashboard notification failed: {e}')
+"
+
+
 
       - name: Run Semgrep SAST scan
         run: |
           mkdir -p reports
+
+          # Find correct Java source path
+          if [ -d "webgoat-lessons" ]; then
+            SCAN_PATH="webgoat-lessons"
+          elif [ -d "src/main/java" ]; then
+            SCAN_PATH="src/main/java"
+          else
+            SCAN_PATH="."
+          fi
+          echo "Scanning path: $SCAN_PATH"
+
           semgrep scan \
             --config=p/java \
             --config=p/owasp-top-ten \
@@ -51,16 +94,20 @@ jobs:
             --severity=WARNING \
             --severity=ERROR \
             --timeout=300 \
-            webgoat-lessons/ || true
+            $SCAN_PATH || true
 
           TOTAL=$(python3 -c "
-          import json
-          with open('reports/${{ env.SCAN_TYPE }}_scan.json') as f:
-              d = json.load(f)
-          print(len(d.get('results', [])))
-          " 2>/dev/null || echo "0")
+import json
+try:
+    with open('reports/${{ env.SCAN_TYPE }}_scan.json') as f:
+        d = json.load(f)
+    print(len(d.get('results', [])))
+except:
+    print(0)
+")
           echo "FINDINGS_COUNT=$TOTAL" >> $GITHUB_ENV
           echo "Findings: $TOTAL"
+
 
       - name: Notify dashboard - scan complete
         run: |
