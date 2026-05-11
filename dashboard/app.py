@@ -489,4 +489,7 @@ if __name__ == '__main__':
     print('  DevSecOps AI POC Dashboard')
     print('  Open http://localhost:5000 in your browser')
     print('=' * 60)
+    print(f'GITHUB_TOKEN_API set: {bool(GITHUB_TOKEN_API)}')
+    print(f'GITHUB_TOKEN_API length: {len(GITHUB_TOKEN_API)}')
+    print(f'All env vars: {[k for k in os.environ.keys() if "GITHUB" in k or "TOKEN" in k]}')
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
