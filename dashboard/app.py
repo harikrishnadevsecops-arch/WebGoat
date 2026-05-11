@@ -125,7 +125,7 @@ def _run_ai_fix_pipeline(findings):
             broadcast('step_update', {'step': 'commit', 'status': 'complete'})
             log_event('Waiting for PR Review and Approval before rescan...', 'info', step='rescan')
             broadcast('step_update', {'step': 'rescan', 'status': 'waiting'})
-            _trigger_rescan_pipeline()
+            #Comment: _trigger_rescan_pipeline()
         else:
             log_event('Git commit failed - check logs', 'error', step='commit')
     except Exception as e:
