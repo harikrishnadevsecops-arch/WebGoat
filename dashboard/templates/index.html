@@ -214,6 +214,21 @@ socket.on('rescan_complete', (d) => {
 
 socket.on('log_entry', (e) => addLogEntry(e));
 socket.on('reset', () => location.reload());
+socket.on('pr_created', (d) => {
+  addLog('Pull Request created: ' + d.url, 'success');
+  addLog('Waiting for security engineer to review and approve...', 'info');
+  const statusEl = document.getElementById('m-status');
+  statusEl.textContent = 'AWAITING PR REVIEW';
+  statusEl.style.color = '#B7770D';
+  const subEl = document.getElementById('m-scan-type');
+  subEl.innerHTML = '<a href="' + d.url + '" target="_blank" style="color:#17A589">View Pull Request #' + d.number + ' →</a>';
+  updateLiveBadge('rescan', 'waiting');
+  STEPS.forEach((s,i) => {
+    if (i < 5) setStepState(s, 'done');
+  });
+  setStepState('rescan', 'running');
+});
+
 
 function updateLiveBadge(step, status) {
   const b = document.getElementById('live-badge');
