@@ -123,8 +123,8 @@ def _run_ai_fix_pipeline(findings):
         if commit_ok:
             log_event('Fixes committed and pushed to GitHub', 'success', step='commit')
             broadcast('step_update', {'step': 'commit', 'status': 'complete'})
-            log_event('Triggering re-scan pipeline...', step='rescan')
-            broadcast('step_update', {'step': 'rescan', 'status': 'running'})
+            log_event('Waiting for PR Review and Approval before rescan...', 'info', step='rescan')
+            broadcast('step_update', {'step': 'rescan', 'status': 'waiting'})
             _trigger_rescan_pipeline()
         else:
             log_event('Git commit failed - check logs', 'error', step='commit')
