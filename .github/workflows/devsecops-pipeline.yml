@@ -24,20 +24,27 @@ jobs:
       SCAN_TYPE: ${{ github.event.inputs.scan_type || 'rescan' }}
 
     steps:
-      - name: Checkout WebGoat
-        uses: actions/checkout@v4
-        with:
-          repository: WebGoat/WebGoat
-          ref: main
-          token: ${{ secrets.MY_GH_TOKEN }}
 
-      - name: Checkout AI fix branch for rescan
-        if: env.SCAN_TYPE == 'rescan' && github.event.pull_request.head.ref != ''
+      - name: Checkout our fork (for scripts and workflows)
         uses: actions/checkout@v4
         with:
           repository: harikrishnadevsecops-arch/WebGoat
-          ref: ${{ github.event.pull_request.head.ref }}
           token: ${{ secrets.MY_GH_TOKEN }}
+
+      - name: Clone original OWASP WebGoat for initial scan
+        if: env.SCAN_TYPE == 'initial'
+        run: |
+          git clone --depth=1 https://github.com/WebGoat/WebGoat.git webgoat-source
+          echo "SCAN_PATH=webgoat-source" >> $GITHUB_ENV
+
+      - name: Clone AI-fixed branch for rescan
+        if: env.SCAN_TYPE == 'rescan'
+        run: |
+          git clone --depth=1 \
+            https://${{ secrets.MY_GH_TOKEN }}@github.com/harikrishnadevsecops-arch/WebGoat.git \
+            webgoat-source
+          echo "SCAN_PATH=webgoat-source" >> $GITHUB_ENV
+
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -56,14 +63,16 @@ jobs:
       - name: Run Semgrep SAST scan
         run: |
           mkdir -p reports
-          if [ -d "webgoat-lessons" ]; then
-            SCAN_PATH="webgoat-lessons"
-          elif [ -d "src/main/java" ]; then
-            SCAN_PATH="src/main/java"
+          BASE="${SCAN_PATH:-webgoat-source}"
+          if [ -d "$BASE/webgoat-lessons" ]; then
+            FINAL_SCAN_PATH="$BASE/webgoat-lessons"
+          elif [ -d "$BASE/src/main/java" ]; then
+            FINAL_SCAN_PATH="$BASE/src/main/java"
           else
-            SCAN_PATH="."
+            FINAL_SCAN_PATH="$BASE"
           fi
           echo "Scanning path: $SCAN_PATH"
+          echo "Scanning: $FINAL_SCAN_PATH"
           semgrep scan \
             --config=p/java \
             --config=p/owasp-top-ten \
@@ -72,7 +81,7 @@ jobs:
             --severity=WARNING \
             --severity=ERROR \
             --timeout=300 \
-            $SCAN_PATH || true
+            $FINAL_SCAN_PATH || true
           echo "Scan complete"
 
       - name: Count findings
