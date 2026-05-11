@@ -14,7 +14,6 @@ db = Database()
 
 REPORTS_DIR   = os.getenv('REPORTS_DIR', '/tmp/poc-reports')
 WEBGOAT_LOCAL = os.getenv('WEBGOAT_LOCAL', '/tmp/poc-webgoat')
-GITHUB_TOKEN  = os.getenv('GITHUB_TOKEN', '')
 GITHUB_REPO   = os.getenv('GITHUB_REPO', 'harikrishnadevsecops-arch/WebGoat')
 GITHUB_TOKEN_API = os.getenv('GITHUB_TOKEN', '')
 os.environ['no_proxy'] = 'localhost,127.0.0.1'
@@ -135,8 +134,8 @@ def _run_ai_fix_pipeline(findings):
         STATE['processing'] = False
 
 def _fix_file_with_ai(abs_file_path, findings):
-    if not GITHUB_TOKEN:
-        log_event('GITHUB_TOKEN not set - skipping AI fix', 'warning')
+    if not GITHUB_TOKEN_API:
+        log_event('GITHUB_TOKEN_API not set - skipping AI fix', 'warning')
         return False
     try:
         with open(abs_file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -159,7 +158,7 @@ Java file:
         response = requests.post(
             GITHUB_MODELS_URL,
             headers={
-                'Authorization': f'Bearer {GITHUB_TOKEN}',
+                'Authorization': f'Bearer {GITHUB_TOKEN_API}',
                 'Content-Type': 'application/json',
             },
             json={
@@ -238,7 +237,7 @@ def _ensure_local_webgoat():
         except Exception as e:
             log_event(f'Cleanup skipped: {e}', 'warning', step='ai_fix')
         try:
-            clone_url = f'https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git'
+            clone_url = f'https://{GITHUB_TOKEN_API}@github.com/{GITHUB_REPO}.git'
             subprocess.run(
                 ['git', 'clone', '--depth=1', clone_url, WEBGOAT_LOCAL],
                 check=True, capture_output=True
@@ -279,7 +278,7 @@ def _git_commit_and_push(fixed_files):
         subprocess.run(['git', 'commit', '-m', msg],
                       cwd=WEBGOAT_LOCAL, check=True, capture_output=True)
  
-        remote_url = f'https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git'
+        remote_url = f'https://{GITHUB_TOKEN_API}@github.com/{GITHUB_REPO}.git'
         subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url],
                       cwd=WEBGOAT_LOCAL, capture_output=True)
         subprocess.run(['git', 'push', 'origin', branch_name],
@@ -321,7 +320,7 @@ The AI agent analysed the Semgrep SAST scan report and automatically remediated 
         r = requests.post(
             f'https://api.github.com/repos/{GITHUB_REPO}/pulls',
             headers={
-                'Authorization': f'Bearer {GITHUB_TOKEN}',
+                'Authorization': f'Bearer {GITHUB_TOKEN_API}',
                 'Accept': 'application/vnd.github.v3+json',
                 'Content-Type': 'application/json'
             },
@@ -350,7 +349,7 @@ The AI agent analysed the Semgrep SAST scan report and automatically remediated 
 
 def _trigger_rescan_pipeline():
     if not GITHUB_TOKEN_API:
-        log_event('GITHUB_TOKEN not set - trigger rescan manually', 'warning')
+        log_event('GITHUB_TOKEN_API not set - trigger rescan manually', 'warning')
         return
     try:
         import urllib3
