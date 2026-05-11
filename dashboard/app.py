@@ -119,10 +119,10 @@ def _run_ai_fix_pipeline(findings):
                 log_event(f'Could not fix: {os.path.basename(file_path)}', 'warning', step='ai_fix')
         log_event(f'AI fix complete: {len(fixed_files)} files patched', 'success', step='ai_fix')
         broadcast('step_update', {'step': 'commit', 'status': 'running'})
-        log_event('Committing fixes to GitLab...', step='commit')
+        log_event('Committing fixes to GitHub...', step='commit')
         commit_ok = _git_commit_and_push(fixed_files)
         if commit_ok:
-            log_event('Fixes committed and pushed to GitLab', 'success', step='commit')
+            log_event('Fixes committed and pushed to GitHub', 'success', step='commit')
             broadcast('step_update', {'step': 'commit', 'status': 'complete'})
             log_event('Triggering re-scan pipeline...', step='rescan')
             broadcast('step_update', {'step': 'rescan', 'status': 'running'})
@@ -228,9 +228,9 @@ Java file:
 
 def _ensure_local_webgoat():
     os.makedirs(WEBGOAT_LOCAL, exist_ok=True)
-    webgoat_lessons = os.path.join(WEBGOAT_LOCAL, 'webgoat-lessons')
-    if not os.path.exists(webgoat_lessons):
-        log_event('Cloning WebGoat from GitHub...', step='ai_fix')
+    git_dir = os.path.join(WEBGOAT_LOCAL, '.git')
+    if not os.path.exists(git_dir):
+        log_event('Cloning WebGoat from GitHub fork...', step='ai_fix')
         try:
             import shutil
             shutil.rmtree(WEBGOAT_LOCAL)
@@ -238,13 +238,12 @@ def _ensure_local_webgoat():
         except Exception as e:
             log_event(f'Cleanup skipped: {e}', 'warning', step='ai_fix')
         try:
+            clone_url = f'https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git'
             subprocess.run(
-                ['git', 'clone', '--depth=1', '--branch', 'v8.2.2',
-                 f'https://{GITHUB_TOKEN_API}@github.com/{GITHUB_REPO}.git',
-                 WEBGOAT_LOCAL],
+                ['git', 'clone', '--depth=1', clone_url, WEBGOAT_LOCAL],
                 check=True, capture_output=True
             )
-            log_event('WebGoat cloned successfully', step='ai_fix')
+            log_event('WebGoat fork cloned successfully', step='ai_fix')
         except Exception as e:
             log_event(f'Clone failed: {e}', 'error', step='ai_fix')
             raise
@@ -410,18 +409,23 @@ def _group_findings_by_file(findings):
         if not path:
             continue
         path_normalized = path.replace('\\', '/')
-        if 'webgoat-lessons' in path_normalized:
-            idx = path_normalized.find('webgoat-lessons')
-            relative_part = path_normalized[idx:]
-            local_path = os.path.join(WEBGOAT_LOCAL, relative_part)
-        elif not os.path.isabs(path):
-            local_path = os.path.join(WEBGOAT_LOCAL, path)
-        else:
-            local_path = path
+
+        # Try to find the file in the local clone
+        # Semgrep paths are relative to scan directory
+        local_path = os.path.join(WEBGOAT_LOCAL, path_normalized)
+
         if os.path.exists(local_path):
             groups.setdefault(local_path, []).append(f)
         else:
-            log.warning(f'File not found for fixing: {local_path}')
+            # Try stripping leading path components
+            parts = path_normalized.split('/')
+            for i in range(len(parts)):
+                candidate = os.path.join(WEBGOAT_LOCAL, *parts[i:])
+                if os.path.exists(candidate):
+                    groups.setdefault(candidate, []).append(f)
+                    break
+            else:
+                log.warning(f'File not found for fixing: {path_normalized}')
     return groups
 
 @app.route('/')
