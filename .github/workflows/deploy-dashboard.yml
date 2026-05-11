@@ -27,7 +27,9 @@ jobs:
           context: ./dashboard
           file: ./dashboard/Dockerfile
           push: true
+          no-cache: true
           tags: ${{ secrets.AZURE_REGISTRY_LOGIN_SERVER }}/devsecops-dashboard:latest
+
 
 
       - name: Login to Azure
