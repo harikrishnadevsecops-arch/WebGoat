@@ -3,6 +3,7 @@ import requests
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 from db import Database
+from report_generator import generate_report
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 log = logging.getLogger(__name__)
@@ -95,6 +96,16 @@ def webhook_scan_complete():
         STATE['current_step'] = 'done'
         broadcast('step_update', {'step': 'done', 'status': 'complete'})
         log_event('POC complete - before/after comparison ready', 'success', step='done')
+        # Auto generate PDF
+        log_event('Generating PDF report...', step='done')
+        pdf_path = generate_report(STATE)
+        if pdf_path:
+            STATE['last_report'] = pdf_path
+            log_event(f'PDF report saved: {os.path.basename(pdf_path)}', 'success', step='done')
+            broadcast('report_ready', {'path': os.path.basename(pdf_path)})
+        else:
+            log_event('PDF generation failed', 'error', step='done')
+
     return jsonify({'ok': True})
 
 def _run_ai_fix_pipeline(findings):
@@ -480,6 +491,33 @@ def api_reset():
     db.clear()
     broadcast('reset', {})
     return jsonify({'ok': True})
+
+@app.route('/api/report')
+def api_report():
+    report_path = STATE.get('last_report', '')
+    if report_path and os.path.exists(report_path):
+        from flask import send_file
+        return send_file(
+            report_path,
+            as_attachment=True,
+            download_name=os.path.basename(report_path),
+            mimetype='application/pdf'
+        )
+    return jsonify({'error': 'No report available'}), 404
+
+@app.route('/api/generate-report', methods=['POST'])
+def api_generate_report():
+    if not STATE['initial_findings'] and not STATE['rescan_findings']:
+        return jsonify({'error': 'No scan data available'}), 400
+    log_event('Generating PDF report on demand...', step='done')
+    pdf_path = generate_report(STATE)
+    if pdf_path:
+        STATE['last_report'] = pdf_path
+        log_event(f'PDF report ready: {os.path.basename(pdf_path)}', 'success', step='done')
+        broadcast('report_ready', {'path': os.path.basename(pdf_path)})
+        return jsonify({'ok': True, 'filename': os.path.basename(pdf_path)})
+    return jsonify({'error': 'PDF generation failed'}), 500
+
 
 @socketio.on('connect')
 def on_connect():

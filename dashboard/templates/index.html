@@ -90,7 +90,8 @@ td.file-col { color:var(--text); font-weight:500; }
   </h1>
   <div style="display:flex;align-items:center;gap:12px">
     <span id="live-badge" class="live-badge idle">IDLE</span>
-    <button class="reset-btn" onclick="resetPOC()"> Reset</button>
+    <button class="reset-btn" onclick="resetPOC()">↺ Reset</button>
+    <button class="reset-btn" id="report-btn" onclick="downloadReport()" disabled style="opacity:0.4">📄 Download Report</button>
   </div>
 </div>
 <div class="main">
@@ -204,16 +205,23 @@ socket.on('ai_fixing_file', (d) => {
 
 socket.on('rescan_complete', (d) => {
   updateMetrics(null, d.remaining, d.before, d.after);
-  addLog('Re-scan complete: ' + d.remaining + ' remaining (' + d.fixed + ' fixed by AI)','success');
+  addLog('Re-scan complete: ' + d.remaining + ' remaining (' + d.fixed + ' fixed by AI)', 'success');
   STEPS.forEach(s => setStepState(s, 'done'));
+  enableReportButton();
   updateLiveBadge('done', 'complete');
   document.getElementById('m-status').textContent = 'COMPLETE ✅';
   document.getElementById('m-scan-type').textContent = 'POC finished';
   loadFindings('rescan');
 });
 
+
 socket.on('log_entry', (e) => addLogEntry(e));
 socket.on('reset', () => location.reload());
+socket.on('report_ready', (d) => {
+  enableReportButton();
+  addLog('PDF report ready to download: ' + d.path, 'success');
+});
+
 socket.on('pr_created', (d) => {
   addLog('Pull Request created: ' + d.url, 'success');
   addLog('Waiting for security engineer to review and approve...', 'info');
@@ -336,6 +344,35 @@ async function loadFindings(type, btn) {
   ).join('');
   wrap.innerHTML='<table><thead><tr><th>File</th><th>Severity</th><th>Rule</th><th>Line</th><th>Message</th></tr></thead><tbody>'+rows+'</tbody></table>';
 }
+
+async function downloadReport() {
+  window.open('/api/report', '_blank');
+}
+
+async function generateReport() {
+  const btn = document.getElementById('report-btn');
+  btn.textContent = '⏳ Generating...';
+  btn.disabled = true;
+  const resp = await fetch('/api/generate-report', {method:'POST'});
+  const data = await resp.json();
+  if (data.ok) {
+    enableReportButton();
+    addLog('PDF report generated successfully', 'success');
+  } else {
+    btn.textContent = '📄 Download Report';
+    btn.disabled = false;
+    addLog('PDF generation failed: ' + (data.error||'unknown'), 'error');
+  }
+}
+
+function enableReportButton() {
+  const btn = document.getElementById('report-btn');
+  btn.disabled = false;
+  btn.style.opacity = '1';
+  btn.textContent = '📄 Download Report';
+  btn.onclick = downloadReport;
+}
+
 
 async function resetPOC() {
   if(!confirm('Reset all scan data?')) return;
