@@ -17,8 +17,8 @@ WEBGOAT_LOCAL = os.getenv('WEBGOAT_LOCAL', '/tmp/poc-webgoat')
 GITHUB_TOKEN  = os.getenv('GITHUB_TOKEN', '')
 GITHUB_REPO   = os.getenv('GITHUB_REPO', 'harikrishnadevsecops-arch/WebGoat')
 GITHUB_TOKEN_API = os.getenv('GITHUB_TOKEN', '')
-os.environ['no_proxy'] = 'localhost,127.0.0.1,gitlab.pcsupportlab.local'
-os.environ['NO_PROXY'] = 'localhost,127.0.0.1,gitlab.pcsupportlab.local'
+os.environ['no_proxy'] = 'localhost,127.0.0.1'
+os.environ['NO_PROXY'] = 'localhost,127.0.0.1'
 GITHUB_MODELS_URL = 'https://models.inference.ai.azure.com/chat/completions'
 GITHUB_MODEL  = 'gpt-4o-mini'
 
@@ -29,6 +29,7 @@ STATE = {
     'rescan_findings': [],
     'log': [],
     'processing': False,
+    'pending_pr': None,
 }
 
 def broadcast(event, data):
@@ -63,11 +64,15 @@ def webhook_step_update():
 def webhook_scan_complete():
     data = request.json or {}
     scan_type    = data.get('scan_type', 'initial')
-    report_path  = data.get('report_path', '')
     findings_cnt = data.get('findings_count', 0)
     pipeline_id  = data.get('pipeline_id', '')
+    report_content = data.get('report_content', '')
+ 
     log_event(f'Scan complete ({scan_type}): {findings_cnt} findings found', 'success')
-    findings = _parse_report(report_path)
+ 
+    # Parse findings from base64 encoded content
+    findings = _parse_report_content(report_content)
+ 
     if scan_type == 'initial':
         STATE['initial_findings'] = findings
         db.save_scan('initial', findings, pipeline_id)
@@ -154,20 +159,23 @@ Java file:
         response = requests.post(
             GITHUB_MODELS_URL,
             headers={
+                'Authorization': f'Bearer {GITHUB_TOKEN}',
                 'Content-Type': 'application/json',
             },
             json={
                 'model': GITHUB_MODEL,
                 'messages': [
-                    {'role': 'system', 'content': 'You are a Java code fixer. Output ONLY raw Java source code. Never explain. Never use markdown. Start directly with package or import or public class.'},
+                    {'role': 'system', 'content': 'You are a Java security expert. Return only valid Java code. Start directly with package or import or public class. Never explain. Never use markdown.'},
                     {'role': 'user', 'content': prompt},
                 ],
-		'stream': False,
+                'temperature': 0.1,
+                'max_tokens': 4000,
             },
-            timeout=300,
+            timeout=60,
         )
         response.raise_for_status()
-        fixed_code = response.json()['message']['content']
+        fixed_code = response.json()['choices'][0]['message']['content']
+
 
         # Strip markdown fences if present
         if '```' in fixed_code:
@@ -246,32 +254,99 @@ def _ensure_local_webgoat():
 
 def _git_commit_and_push(fixed_files):
     try:
+        import time
+        branch_name = f'ai-fix-{int(time.time())}'
+ 
         subprocess.run(['git', 'config', 'user.email', 'ai-agent@devsecops.poc'],
                       cwd=WEBGOAT_LOCAL, capture_output=True)
         subprocess.run(['git', 'config', 'user.name', 'AI Security Agent'],
                       cwd=WEBGOAT_LOCAL, capture_output=True)
+ 
+        # Create new branch
+        subprocess.run(['git', 'checkout', '-b', branch_name],
+                      cwd=WEBGOAT_LOCAL, check=True, capture_output=True)
+ 
         for f in fixed_files:
             rel = os.path.relpath(f, WEBGOAT_LOCAL)
             subprocess.run(['git', 'add', rel], cwd=WEBGOAT_LOCAL, capture_output=True)
+ 
         status = subprocess.run(['git', 'status', '--porcelain'],
                                cwd=WEBGOAT_LOCAL, capture_output=True, text=True)
         if not status.stdout.strip():
             log_event('No changes to commit', 'warning', step='commit')
             return True
+ 
         msg = f'[AI-Fix] Auto-remediated {len(fixed_files)} vulnerable files'
         subprocess.run(['git', 'commit', '-m', msg],
                       cwd=WEBGOAT_LOCAL, check=True, capture_output=True)
-        # Push to GitHub using token authentication
-        remote_url = f'https://{GITHUB_TOKEN_API}@github.com/{GITHUB_REPO}.git'
+ 
+        remote_url = f'https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git'
         subprocess.run(['git', 'remote', 'set-url', 'origin', remote_url],
                       cwd=WEBGOAT_LOCAL, capture_output=True)
-        subprocess.run(['git', 'push', 'origin', 'HEAD'],
+        subprocess.run(['git', 'push', 'origin', branch_name],
                       cwd=WEBGOAT_LOCAL, check=True, capture_output=True)
-        log_event('Fixed files pushed to GitHub', 'success', step='commit')
+ 
+        log_event(f'Fixed files pushed to branch: {branch_name}', 'success', step='commit')
+ 
+        # Create Pull Request
+        _create_pull_request(branch_name, len(fixed_files))
         return True
+ 
     except subprocess.CalledProcessError as e:
         log_event(f'Git error: {e}', 'error')
         return False
+
+
+def _create_pull_request(branch_name, files_fixed):
+    try:
+        pr_body = f"""## AI Security Fix — Automated Vulnerability Remediation
+ 
+### Summary
+This Pull Request was automatically created by the DevSecOps AI Agent.
+ 
+- **Files fixed:** {files_fixed}
+- **AI Model:** GitHub Models API (gpt-4o-mini)
+- **Branch:** {branch_name}
+ 
+### What was fixed
+The AI agent analysed the Semgrep SAST scan report and automatically remediated the identified vulnerabilities.
+ 
+### Review checklist
+- [ ] Review each changed file carefully
+- [ ] Verify the fix addresses the vulnerability correctly
+- [ ] Ensure no new issues were introduced
+- [ ] Approve and merge to trigger automatic re-scan
+ 
+> ⚠️ Please review all changes before merging. The re-scan will run automatically after merge.
+"""
+        r = requests.post(
+            f'https://api.github.com/repos/{GITHUB_REPO}/pulls',
+            headers={
+                'Authorization': f'Bearer {GITHUB_TOKEN}',
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'title': f'[AI-Fix] Automated security vulnerability remediation',
+                'body': pr_body,
+                'head': branch_name,
+                'base': 'main'
+            },
+            timeout=30
+        )
+        if r.status_code == 201:
+            pr_url = r.json().get('html_url', '')
+            pr_number = r.json().get('number', '')
+            STATE['pending_pr'] = {'url': pr_url, 'number': pr_number, 'branch': branch_name}
+            log_event(f'Pull Request created: {pr_url}', 'success', step='commit')
+            broadcast('pr_created', {'url': pr_url, 'number': pr_number, 'branch': branch_name})
+            log_event('Waiting for PR review and approval...', 'info', step='rescan')
+            broadcast('step_update', {'step': 'rescan', 'status': 'waiting'})
+        else:
+            log_event(f'PR creation failed: {r.status_code} {r.text[:200]}', 'error')
+    except Exception as e:
+        log_event(f'Could not create PR: {e}', 'error')
+
 
 
 def _trigger_rescan_pipeline():
@@ -302,6 +377,16 @@ def _trigger_rescan_pipeline():
         log_event(f'Could not auto-trigger re-scan: {e}. Run manually.', 'warning')
 
 
+def _parse_report_content(report_content):
+    try:
+        import base64
+        decoded = base64.b64decode(report_content).decode('utf-8')
+        data = json.loads(decoded)
+        return data.get('results', [])
+    except Exception as e:
+        log_event(f'Could not parse report content: {e}', 'error')
+        return []
+ 
 def _parse_report(report_path):
     try:
         with open(report_path, 'r') as f:
