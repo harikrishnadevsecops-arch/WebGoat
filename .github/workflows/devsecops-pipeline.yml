@@ -75,7 +75,9 @@ jobs:
           SCAN_TYPE: ${{ env.SCAN_TYPE }}
           FINDINGS_COUNT: ${{ env.FINDINGS_COUNT }}
           GITHUB_RUN_ID: ${{ github.run_id }}
+          DASHBOARD_URL: ${{ env.DASHBOARD_URL }}
         run: python3 scripts/notify_dashboard.py
+
 
       - name: Upload scan report
         uses: actions/upload-artifact@v4
