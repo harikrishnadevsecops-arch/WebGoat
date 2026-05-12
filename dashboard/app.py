@@ -237,28 +237,26 @@ Java file:
         return False
 
 def _ensure_local_webgoat():
-    os.makedirs(WEBGOAT_LOCAL, exist_ok=True)
-    git_dir = os.path.join(WEBGOAT_LOCAL, '.git')
-    if not os.path.exists(git_dir):
-        log_event('Cloning WebGoat from GitHub fork...', step='ai_fix')
+    import shutil
+    log_event('Cloning fresh WebGoat from original OWASP repo...', step='ai_fix')
+    if os.path.exists(WEBGOAT_LOCAL):
         try:
-            import shutil
             shutil.rmtree(WEBGOAT_LOCAL)
-            os.makedirs(WEBGOAT_LOCAL, exist_ok=True)
         except Exception as e:
-            log_event(f'Cleanup skipped: {e}', 'warning', step='ai_fix')
-        try:
-            clone_url = f'https://{GITHUB_TOKEN_API}@github.com/{GITHUB_REPO}.git'
-            subprocess.run(
-                ['git', 'clone', '--depth=1', clone_url, WEBGOAT_LOCAL],
-                check=True, capture_output=True
-            )
-            log_event('WebGoat fork cloned successfully', step='ai_fix')
-        except Exception as e:
-            log_event(f'Clone failed: {e}', 'error', step='ai_fix')
-            raise
-    else:
-        log_event('WebGoat already cloned - using existing copy', step='ai_fix')
+            log_event(f'Cleanup warning: {e}', 'warning', step='ai_fix')
+    os.makedirs(WEBGOAT_LOCAL, exist_ok=True)
+    try:
+        subprocess.run(
+            ['git', 'clone', '--depth=1',
+             'https://github.com/WebGoat/WebGoat.git',
+             WEBGOAT_LOCAL],
+            check=True, capture_output=True
+        )
+        log_event('Fresh WebGoat cloned from original OWASP repo', step='ai_fix')
+    except Exception as e:
+        log_event(f'Clone failed: {e}', 'error', step='ai_fix')
+        raise
+
 
 
 def _git_commit_and_push(fixed_files):
