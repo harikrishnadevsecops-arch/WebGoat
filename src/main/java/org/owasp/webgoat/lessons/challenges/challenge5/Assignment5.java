@@ -1,7 +1,3 @@
-/*
- * SPDX-FileCopyrightText: Copyright © 2017 WebGoat authors
- * SPDX-License-Identifier: GPL-2.0-or-later
- */
 package org.owasp.webgoat.lessons.challenges.challenge5;
 
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
@@ -42,18 +38,18 @@ public class Assignment5 implements AssignmentEndpoint {
     try (var connection = dataSource.getConnection()) {
       PreparedStatement statement =
           connection.prepareStatement(
-              "select password from challenge_users where userid = '"
-                  + username_login
-                  + "' and password = '"
-                  + password_login
-                  + "'");
+              "select password from challenge_users where userid = ? and password = ?");
+      statement.setString(1, username_login);
+      statement.setString(2, password_login);
       ResultSet resultSet = statement.executeQuery();
-
       if (resultSet.next()) {
-        return success(this).feedback("challenge.solved").feedbackArgs(flags.getFlag(5)).build();
+        return success(this).feedback("login.success").build();
       } else {
-        return failed(this).feedback("challenge.close").build();
+        return failed(this).feedback("login.failed").build();
       }
+    } catch (Exception e) {
+      log.error("Login error", e);
+      return failed(this).feedback("login.error").build();
     }
   }
 }
