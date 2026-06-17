@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     env:
-      DASHBOARD_URL: https://devsecops-dashboard.calmtree-dd2b6dea.eastus.azurecontainerapps.io
+      DASHBOARD_URL: https://devsecops-dashboard.lemondesert-4696bb43.eastus.azurecontainerapps.io
       SCAN_TYPE: ${{ github.event.inputs.scan_type || 'rescan' }}
 
     steps:
