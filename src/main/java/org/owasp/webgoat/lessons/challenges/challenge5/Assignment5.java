@@ -48,7 +48,7 @@ public class Assignment5 implements AssignmentEndpoint {
         return failed(this).feedback("login.failed").build();
       }
     } catch (Exception e) {
-      log.error("Login error", e);
+      log.error("Error during login", e);
       return failed(this).feedback("login.error").build();
     }
   }
