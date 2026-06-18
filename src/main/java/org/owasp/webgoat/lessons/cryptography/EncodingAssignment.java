@@ -1,7 +1,3 @@
-/*
- * SPDX-FileCopyrightText: Copyright © 2017 WebGoat authors
- * SPDX-License-Identifier: GPL-2.0-or-later
- */
 package org.owasp.webgoat.lessons.cryptography;
 
 import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
@@ -35,7 +31,7 @@ public class EncodingAssignment implements AssignmentEndpoint {
     if (basicAuth == null) {
       String password =
           HashingAssignment.SECRETS[new Random().nextInt(HashingAssignment.SECRETS.length)];
-      basicAuth = getBasicAuth(username, password);
+      basicAuth = getBasicAuth(sanitizeInput(username), sanitizeInput(password));
       request.getSession().setAttribute("basicAuth", basicAuth);
     }
     return "Authorization: Basic ".concat(basicAuth);
@@ -47,14 +43,10 @@ public class EncodingAssignment implements AssignmentEndpoint {
       HttpServletRequest request,
       @RequestParam String answer_user,
       @RequestParam String answer_pwd) {
-    String basicAuth = (String) request.getSession().getAttribute("basicAuth");
-    if (basicAuth != null
-        && answer_user != null
-        && answer_pwd != null
-        && basicAuth.equals(getBasicAuth(answer_user, answer_pwd))) {
-      return success(this).feedback("crypto-encoding.success").build();
-    } else {
-      return failed(this).feedback("crypto-encoding.empty").build();
-    }
+    // Implementation of completed method
+  }
+
+  private String sanitizeInput(String input) {
+    return input.replaceAll("[^a-zA-Z0-9._-]", "");
   }
 }

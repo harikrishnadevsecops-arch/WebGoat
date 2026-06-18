@@ -1,0 +1,109 @@
+name: DevSecOps AI Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      scan_type:
+        description: 'Scan type'
+        required: true
+        default: 'initial'
+        type: choice
+        options:
+          - initial
+          - rescan
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    env:
+      DASHBOARD_URL: https://devsecops-dashboard.lemondesert-4696bb43.eastus.azurecontainerapps.io
+      SCAN_TYPE: ${{ github.event.inputs.scan_type || 'rescan' }}
+
+    steps:
+
+      - name: Checkout our fork (for scripts and workflows)
+        uses: actions/checkout@v4
+        with:
+          repository: harikrishnadevsecops-arch/WebGoat
+          token: ${{ secrets.MY_GH_TOKEN }}
+
+      - name: Clone original OWASP WebGoat for initial scan
+        if: env.SCAN_TYPE == 'initial'
+        run: |
+          git clone --depth=1 https://github.com/WebGoat/WebGoat.git webgoat-source
+          echo "SCAN_PATH=webgoat-source" >> $GITHUB_ENV
+
+      - name: Clone AI-fixed branch for rescan
+        if: env.SCAN_TYPE == 'rescan'
+        run: |
+          git clone --depth=1 \
+            https://${{ secrets.MY_GH_TOKEN }}@github.com/harikrishnadevsecops-arch/WebGoat.git \
+            webgoat-source
+          echo "SCAN_PATH=webgoat-source" >> $GITHUB_ENV
+
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Notify dashboard - scan starting
+        run: |
+          curl -s -X POST "$DASHBOARD_URL/webhook/step-update" \
+            -H "Content-Type: application/json" \
+            -d "{\"step\":\"scan\",\"status\":\"running\",\"scan_type\":\"$SCAN_TYPE\"}" || true
+
+      - name: Run Semgrep SAST scan
+        run: |
+          mkdir -p reports
+          BASE="${SCAN_PATH:-webgoat-source}"
+          if [ -d "$BASE/webgoat-lessons" ]; then
+            FINAL_SCAN_PATH="$BASE/webgoat-lessons"
+          elif [ -d "$BASE/src/main/java" ]; then
+            FINAL_SCAN_PATH="$BASE/src/main/java"
+          else
+            FINAL_SCAN_PATH="$BASE"
+          fi
+          echo "Scanning path: $SCAN_PATH"
+          echo "Scanning: $FINAL_SCAN_PATH"
+          semgrep scan \
+            --config=p/java \
+            --config=p/owasp-top-ten \
+            --json \
+            --output=reports/${SCAN_TYPE}_scan.json \
+            --severity=WARNING \
+            --severity=ERROR \
+            --timeout=300 \
+            $FINAL_SCAN_PATH || true
+          echo "Scan complete"
+
+      - name: Count findings
+        env:
+          SCAN_TYPE: ${{ env.SCAN_TYPE }}
+        run: |
+          TOTAL=$(python3 scripts/count_findings.py)
+          echo "FINDINGS_COUNT=$TOTAL" >> $GITHUB_ENV
+          echo "Findings: $TOTAL"
+
+      - name: Notify dashboard - scan complete
+        env:
+          SCAN_TYPE: ${{ env.SCAN_TYPE }}
+          FINDINGS_COUNT: ${{ env.FINDINGS_COUNT }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          DASHBOARD_URL: ${{ env.DASHBOARD_URL }}
+        run: python3 scripts/notify_dashboard.py
+
+
+      - name: Upload scan report
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report-${{ env.SCAN_TYPE }}
+          path: reports/
+          retention-days: 30
